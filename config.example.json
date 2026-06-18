@@ -1,0 +1,75 @@
+{
+  "browser": {
+    "engine": "playwright",
+    "executablePath": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "channel": "",
+    "userDataDir": "C:\\Users\\17162\\AppData\\Local\\Microsoft\\Edge\\User Data",
+    "profileDirectory": "Default",
+    "authStrategy": "persistent_profile",
+    "storageStatePath": "E:\\code\\py\\info_user_x\\data\\runtime\\storage-state.json",
+    "headless": false,
+    "locale": "en-US",
+    "viewport": {
+      "width": 1440,
+      "height": 960
+    },
+    "launchArgs": []
+  },
+  "network": {
+    "proxyUrl": "http://127.0.0.1:7890",
+    "timeoutMs": 60000,
+    "downloadTimeoutMs": 60000
+  },
+  "collection": {
+    "defaultPostsPerSource": 5,
+    "waitAfterNavigationMs": 4000,
+    "maxScrollRounds": 4,
+    "saveHtmlSnapshot": true,
+    "savePageSnapshot": true,
+    "saveScreenshot": true,
+    "downloadImages": true
+  },
+  "llm": {
+    "enabled": true,
+    "provider": "openai_compatible",
+    "baseUrl": "https://api.minimax.io/v1",
+    "apiKeyEnv": "MINIMAX_API_KEY",
+    "model": "MiniMax-M3",
+    "targetLanguage": "zh-CN",
+    "timeoutMs": 45000,
+    "retries": 2,
+    "temperature": 0.1,
+    "maxCompletionTokens": 1200,
+    "useForExtractionFallback": true
+  },
+  "storage": {
+    "rootDir": "E:\\code\\py\\info_user_x\\data",
+    "exportStorageStatePath": "E:\\code\\py\\info_user_x\\data\\runtime\\storage-state.json",
+    "loginCheckPath": "E:\\code\\py\\info_user_x\\data\\runs\\login-check.json"
+  },
+  "database": {
+    "enabled": false,
+    "optional": true,
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "postgres",
+    "user": "taishi",
+    "passwordEnv": "PGPASSWORD",
+    "schema": "info_user_x"
+  },
+  "schedule": {
+    "enabled": true,
+    "windowsTaskName": "InfoUserX-DailyCollector",
+    "time": "08:30",
+    "linuxCron": "30 8 * * *"
+  },
+  "sources": [
+    {
+      "id": "dailydarkweb",
+      "label": "DailyDarkWeb",
+      "enabled": true,
+      "url": "https://x.com/DailyDarkWeb",
+      "maxPosts": 5
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "info_user_x",
+  "version": "2.0.0",
+  "main": "src/cli/collect.js",
+  "scripts": {
+    "check:x": "node src/cli/check-login.js",
+    "collect:x": "node src/cli/collect.js"
+  },
+  "keywords": [
+    "x",
+    "playwright",
+    "archive",
+    "translation",
+    "postgres"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "Archive X posts with snapshots, translation, and dedupe",
+  "dependencies": {
+    "pg": "^8.16.3",
+    "playwright-core": "^1.59.1",
+    "undici": "^7.16.0"
+  }
+}
