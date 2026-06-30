@@ -1,88 +1,114 @@
 # Architecture Summary
 
-## Current Engine
+## Browser and Auth
 
-- Browser engine: `Playwright`
-- Login mode on Windows: reuse your real Edge profile
-- Linux migration path: export `storage-state.json`, then switch config to `storage_state`
-- Proxy: `http://127.0.0.1:7890`
+- engine: `Playwright`
+- Windows auth: real Edge profile reuse
+- Linux auth: `storage_state`
+- auth migration commands:
+  - `npm run auth:export`
+  - `npm run auth:import -- <storage-state.json>`
 
-## How Posts Are Identified
+## Collection Flow
 
-The collector opens an exact source URL from `config.json`, reads the visible timeline, extracts tweet permalinks, then opens each tweet permalink page to capture a reproducible snapshot.
+For each configured source URL:
 
-For each post we collect:
+1. open the exact source timeline
+2. collect visible post permalinks
+3. open each permalink page
+4. try to expand folded content
+5. extract text, links, media, timestamps, and snapshots
+6. translate text
+7. store local archive
+8. send alerts if rules match
+9. persist dedupe state locally and optionally in PostgreSQL
 
-- canonical post URL
-- post ID
-- author handle
-- UTC created time
-- original text
-- extracted links
-- hashtags and mentions
-- image URLs
-- whether video is present
-- article HTML snapshot
-- page HTML snapshot
-- screenshot
+## Snapshot and Replay
 
-## Reproduction Strategy
-
-Each stored post keeps enough material to reconstruct the post later:
+Each post archive contains:
 
 - `original.txt`
 - `translated.zh-CN.txt`
 - `translation.json`
 - `post.json`
+- `ingest-record.json`
 - `article.html`
 - `page.html`
 - `tweet.png`
-- `media/*`
 - `links.json`
+- `media/*`
 
-Even if X later changes layout, you still retain:
+This is enough for:
 
-- the original text
-- the translated text
-- a screenshot
-- the HTML snapshot
-- the resource manifest
-- the canonical URL
+- manual review
+- later model-based parsing
+- SFTP handoff
+- FTP-side downstream consumers
+
+## Folded Content Handling
+
+Folded or warning-gated content is handled by opening the permalink page and attempting expansion before extraction.
+
+Recorded fields:
+
+- `uiState.hadFoldIndicators`
+- `uiState.expandActions`
 
 ## Deduplication
 
-Deduplication key:
+Local dedupe:
 
-- `source.id + postId`
+- `source.id + ":" + postId`
 
-Optional PostgreSQL dedupe:
+PostgreSQL dedupe:
 
-- same canonical key is also stored in PostgreSQL when enabled
+- same canonical key as `posts.canonical_key`
 
-The collector therefore avoids duplicate ingestion across repeated runs, while still keeping the local archive.
+Alert dedupe:
 
-## Translation
+- `source.id + ":" + postId + ":" + ruleId`
 
-Translation uses an OpenAI-compatible endpoint and expects `MiniMax-M3` by default.
+## Alerting
 
-The translation output is cleaned through:
+Alert target:
+
+- DingTalk custom robot webhook
+
+Alert match inputs:
+
+- original text
+- translated text
+- source URL
+- post URL
+- extracted links
+
+## Database Design
+
+Tables:
+
+- `source_profiles`
+- `posts`
+- `alerts`
+- `runs`
+- `ingest_jobs`
+
+Recommended use:
+
+- `posts`: canonical archive and primary dedupe source
+- `ingest_jobs`: downstream cleaning and warehouse status tracking
+- `alerts`: operational audit for message delivery
+
+## LLM Compatibility
+
+Collector-side translation:
+
+- OpenAI-compatible endpoint
+- default model: `MiniMax-M3`
+
+Output cleanup:
 
 - strict JSON prompting
-- JSON extraction from noisy model output
-- schema validation before writing files
+- JSON extraction from noisy responses
+- removal of `<think>` and `<thinking>` blocks
 
-## Practical Detection Note
-
-There is no zero-detection automation stack.
-
-Current choice:
-
-- `Playwright + real Edge profile`
-
-Reason:
-
-- closer to normal browser behavior than stock Selenium setups
-- easier profile reuse than Selenium
-- better maintainability and Linux portability than DrissionPage
-
-This is an engineering judgment, not a guarantee of lower detection in every environment.
+That keeps the interface practical for both MiniMax and Qwen style OpenAI-compatible services.

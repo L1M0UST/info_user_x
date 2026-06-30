@@ -1,5 +1,5 @@
 const { fetchJson } = require('./http');
-const { extractJsonObject, normalizeWhitespace, sleep } = require('./utils');
+const { extractJsonObject, normalizeWhitespace, sleep, stripThinkTags } = require('./utils');
 
 function getApiKey(config) {
   return process.env[config.llm.apiKeyEnv] || '';
@@ -8,13 +8,13 @@ function getApiKey(config) {
 function extractMessageContent(response) {
   const content = response?.choices?.[0]?.message?.content;
   if (typeof content === 'string') {
-    return content;
+    return stripThinkTags(content);
   }
 
   if (Array.isArray(content)) {
-    return content
-      .map((item) => (typeof item === 'string' ? item : item?.text || ''))
-      .join('');
+    return stripThinkTags(
+      content.map((item) => (typeof item === 'string' ? item : item?.text || '')).join('')
+    );
   }
 
   return '';
@@ -26,7 +26,7 @@ function validateTranslationResult(parsed, targetLanguage) {
   }
 
   const translatedText = typeof parsed.translated_text === 'string'
-    ? parsed.translated_text.trim()
+    ? normalizeWhitespace(parsed.translated_text)
     : '';
   const detectedLanguage = typeof parsed.detected_language === 'string'
     ? parsed.detected_language.trim()
@@ -126,7 +126,7 @@ async function translatePost(config, snapshot) {
     target_language: config.llm.targetLanguage,
     post_text: originalText,
     links: snapshot.links.map((link) => link.url),
-    notes: 'Keep URLs, usernames, hashtags, and codes unchanged when possible.',
+    notes: 'Keep URLs, usernames, hashtags, and short platform codes unchanged when possible.',
   });
 
   if (!result) {

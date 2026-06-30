@@ -8,31 +8,18 @@ function quoteIdentifier(identifier) {
   return `"${identifier}"`;
 }
 
-async function createPostgresStore(config) {
-  if (!config.database.enabled) {
-    return null;
-  }
-
-  const client = new Client({
-    host: config.database.host,
-    port: config.database.port,
-    database: config.database.database,
-    user: config.database.user,
-    password: process.env[config.database.passwordEnv] || undefined,
-  });
-
-  try {
-    await client.connect();
-  } catch (error) {
-    if (config.database.optional) {
-      console.warn(`PostgreSQL disabled due to connection failure: ${error.message}`);
-      return null;
-    }
-    throw error;
-  }
-
-  const schemaName = quoteIdentifier(config.database.schema);
+async function initSchema(client, schemaName) {
   await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS ${schemaName}.source_profiles (
+      source_id TEXT PRIMARY KEY,
+      source_label TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      author_handle TEXT,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   await client.query(`
     CREATE TABLE IF NOT EXISTS ${schemaName}.posts (
       canonical_key TEXT PRIMARY KEY,
@@ -59,13 +46,42 @@ async function createPostgresStore(config) {
     )
   `);
   await client.query(`
+    CREATE TABLE IF NOT EXISTS ${schemaName}.alerts (
+      alert_key TEXT PRIMARY KEY,
+      canonical_key TEXT NOT NULL,
+      rule_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      post_id TEXT NOT NULL,
+      post_url TEXT NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL,
+      payload JSONB NOT NULL
+    )
+  `);
+  await client.query(`
     CREATE TABLE IF NOT EXISTS ${schemaName}.runs (
       run_id TEXT PRIMARY KEY,
       collected_at TIMESTAMPTZ NOT NULL,
       payload JSONB NOT NULL
     )
   `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS ${schemaName}.ingest_jobs (
+      canonical_key TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      post_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      cleaning_provider TEXT,
+      cleaning_model TEXT,
+      cleaning_attempts INTEGER NOT NULL DEFAULT 0,
+      cleaned_at TIMESTAMPTZ,
+      downstream_payload JSONB,
+      error_message TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
 
+function createStore(client, schemaName) {
   return {
     async hasPost(canonicalKey) {
       const result = await client.query(
@@ -73,6 +89,26 @@ async function createPostgresStore(config) {
         [canonicalKey]
       );
       return result.rowCount > 0;
+    },
+    async saveSourceProfile(profile) {
+      await client.query(`
+        INSERT INTO ${schemaName}.source_profiles (
+          source_id, source_label, source_url, author_handle, enabled, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (source_id) DO UPDATE SET
+          source_label = EXCLUDED.source_label,
+          source_url = EXCLUDED.source_url,
+          author_handle = EXCLUDED.author_handle,
+          enabled = EXCLUDED.enabled,
+          updated_at = NOW()
+      `, [
+        profile.sourceId,
+        profile.sourceLabel,
+        profile.sourceUrl,
+        profile.authorHandle,
+        profile.enabled,
+      ]);
     },
     async savePost(record) {
       await client.query(`
@@ -132,6 +168,24 @@ async function createPostgresStore(config) {
         record.payload,
       ]);
     },
+    async saveAlert(record) {
+      await client.query(`
+        INSERT INTO ${schemaName}.alerts (
+          alert_key, canonical_key, rule_id, source_id, post_id, post_url, sent_at, payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (alert_key) DO NOTHING
+      `, [
+        record.alertKey,
+        record.canonicalKey,
+        record.ruleId,
+        record.sourceId,
+        record.postId,
+        record.postUrl,
+        record.sentAt,
+        record.payload,
+      ]);
+    },
     async saveRun(summary) {
       await client.query(`
         INSERT INTO ${schemaName}.runs (run_id, collected_at, payload)
@@ -149,6 +203,36 @@ async function createPostgresStore(config) {
   };
 }
 
+async function createPostgresStore(config) {
+  if (!config.database.enabled) {
+    return null;
+  }
+
+  const client = new Client({
+    host: config.database.host,
+    port: config.database.port,
+    database: config.database.database,
+    user: config.database.user,
+    password: process.env[config.database.passwordEnv] || undefined,
+    ssl: config.database.ssl ? { rejectUnauthorized: false } : undefined,
+  });
+
+  try {
+    await client.connect();
+  } catch (error) {
+    if (config.database.optional) {
+      console.warn(`PostgreSQL disabled due to connection failure: ${error.message}`);
+      return null;
+    }
+    throw error;
+  }
+
+  const schemaName = quoteIdentifier(config.database.schema);
+  await initSchema(client, schemaName);
+  return createStore(client, schemaName);
+}
+
 module.exports = {
   createPostgresStore,
+  initSchema,
 };

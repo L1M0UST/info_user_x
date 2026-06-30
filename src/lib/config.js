@@ -71,6 +71,24 @@ function getDefaults() {
       temperature: 0.1,
       maxCompletionTokens: 1200,
       useForExtractionFallback: true,
+      removeThinkTags: true,
+    },
+    alerts: {
+      enabled: true,
+      dingtalk: {
+        webhook: '',
+        secret: '',
+      },
+      rules: [
+        {
+          id: 'china-related',
+          label: 'China Related',
+          enabled: true,
+          severity: 'high',
+          pattern: '(中国|China|Chinese|CN\\b|上海|北京|深圳|香港|台湾|Shanghai|Beijing|Shenzhen|Hong\\s*Kong|Taiwan)',
+          flags: 'i',
+        },
+      ],
     },
     storage: {
       rootDir: path.join(projectRoot, 'data'),
@@ -86,6 +104,7 @@ function getDefaults() {
       user: 'taishi',
       passwordEnv: 'PGPASSWORD',
       schema: 'info_user_x',
+      ssl: false,
     },
     schedule: {
       enabled: true,

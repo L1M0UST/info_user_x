@@ -22,14 +22,27 @@ function writeJson(filePath, data) {
 }
 
 function migrateLegacyState(state) {
-  if (!state || state.version === 2) {
+  if (!state) {
     return state;
   }
 
+  if (state.version === 3) {
+    return state;
+  }
+
+  if (state.version === 2) {
+    return {
+      ...state,
+      version: 3,
+      alerts: state.alerts || {},
+    };
+  }
+
   const migrated = {
-    version: 2,
+    version: 3,
     sources: {},
     posts: {},
+    alerts: {},
   };
 
   for (const [authorHandle, authorState] of Object.entries(state.authors || {})) {
@@ -62,9 +75,10 @@ function migrateLegacyState(state) {
 
 function createEmptyState() {
   return {
-    version: 2,
+    version: 3,
     sources: {},
     posts: {},
+    alerts: {},
   };
 }
 
@@ -92,6 +106,14 @@ function buildPostDir(rootDir, source, snapshot) {
   );
 }
 
+function toRelative(rootDir, filePath) {
+  if (!filePath) {
+    return null;
+  }
+
+  return path.relative(rootDir, filePath);
+}
+
 async function makeStorage(config, postgresStore) {
   const rootDir = config.storage.rootDir;
   const statePath = path.join(rootDir, 'state', 'index.json');
@@ -103,10 +125,15 @@ async function makeStorage(config, postgresStore) {
 
   const existingState = readJson(statePath, createEmptyState());
   const state = migrateLegacyState(existingState) || createEmptyState();
-  if (state.version !== 2) {
-    state.version = 2;
+  if (state.version !== 3) {
+    state.version = 3;
+  }
+  if (!state.alerts) {
+    state.alerts = {};
   }
   writeJson(statePath, state);
+
+  const runExports = [];
 
   async function saveState() {
     writeJson(statePath, state);
@@ -123,6 +150,23 @@ async function makeStorage(config, postgresStore) {
     }
 
     return false;
+  }
+
+  async function hasAlert(alertKey) {
+    return Boolean(state.alerts[alertKey]);
+  }
+
+  async function markAlertSent(record) {
+    state.alerts[record.alertKey] = {
+      alertKey: record.alertKey,
+      canonicalKey: record.canonicalKey,
+      ruleId: record.ruleId,
+      sourceId: record.sourceId,
+      postId: record.postId,
+      postUrl: record.postUrl,
+      sentAt: record.sentAt,
+    };
+    await saveState();
   }
 
   async function markSourceChecked(source, status) {
@@ -195,6 +239,52 @@ async function makeStorage(config, postgresStore) {
 
     writeJson(postJsonPath, payload);
 
+    const ingestRecord = {
+      schemaVersion: 1,
+      canonicalKey,
+      source: payload.source,
+      post: {
+        postId: snapshot.postId,
+        postUrl: snapshot.postUrl,
+        canonicalUrl: snapshot.canonicalUrl,
+        createdAt: snapshot.createdAt,
+        authorHandle: snapshot.authorHandle,
+        pageLang: snapshot.pageLang,
+        originalText: snapshot.text.original,
+        translatedText: translation?.translatedText || '',
+        detectedLanguage: translation?.detectedLanguage || snapshot.pageLang || 'unknown',
+        targetLanguage: translation?.targetLanguage || config.llm.targetLanguage,
+        hashtags: snapshot.hashtags,
+        mentions: snapshot.mentions,
+        quotedPostUrls: snapshot.quotedPostUrls,
+        links: snapshot.links,
+        hasVideo: snapshot.media.hasVideo,
+        videoPostUrl: snapshot.media.videoPostUrl,
+        uiState: snapshot.uiState,
+      },
+      localFiles: {
+        postDir: toRelative(rootDir, postDir),
+        postJsonPath: toRelative(rootDir, postJsonPath),
+        originalTextPath: toRelative(rootDir, originalTextPath),
+        translatedTextPath: translation && translation.translatedText ? toRelative(rootDir, translatedTextPath) : null,
+        translationJsonPath: translation && translation.translatedText ? toRelative(rootDir, translationJsonPath) : null,
+        screenshotPath: toRelative(rootDir, snapshot.snapshots.screenshotPath),
+        articleSnapshotPath: toRelative(rootDir, snapshot.snapshots.articleSnapshotPath),
+        pageSnapshotPath: toRelative(rootDir, snapshot.snapshots.pageSnapshotPath),
+        mediaFiles: snapshot.media.downloadedImages.map((item) => ({
+          ...item,
+          localPath: toRelative(rootDir, item.localPath),
+        })),
+      },
+      downstream: {
+        archiveReady: true,
+        transferRecommended: 'sftp',
+        ftpConsumerCompatible: true,
+      },
+    };
+    writeJson(path.join(postDir, 'ingest-record.json'), ingestRecord);
+    runExports.push(ingestRecord);
+
     const contentHash = sha1(`${snapshot.postId}\n${snapshot.text.original}\n${translation?.translatedText || ''}`);
     const collectedAt = new Date().toISOString();
 
@@ -239,6 +329,7 @@ async function makeStorage(config, postgresStore) {
       canonicalKey,
       postDir,
       postJsonPath,
+      ingestRecord,
     };
   }
 
@@ -253,6 +344,23 @@ async function makeStorage(config, postgresStore) {
     writeJson(summaryPath, runRecord);
     writeJson(path.join(runsDir, 'latest.json'), runRecord);
 
+    const exportDir = path.join(rootDir, 'exports', stamp);
+    ensureDir(exportDir);
+    const ndjsonPath = path.join(exportDir, 'posts.ndjson');
+    const manifestPath = path.join(exportDir, 'manifest.json');
+    fs.writeFileSync(
+      ndjsonPath,
+      runExports.map((item) => JSON.stringify(item)).join('\n') + (runExports.length ? '\n' : ''),
+      'utf8'
+    );
+    writeJson(manifestPath, {
+      generatedAt: runRecord.collectedAt,
+      runId: runRecord.runId,
+      postCount: runExports.length,
+      ndjsonPath: toRelative(rootDir, ndjsonPath),
+      summaryPath: toRelative(rootDir, summaryPath),
+    });
+
     if (postgresStore) {
       await postgresStore.saveRun(runRecord);
     }
@@ -261,7 +369,9 @@ async function makeStorage(config, postgresStore) {
   }
 
   return {
+    hasAlert,
     hasPost,
+    markAlertSent,
     markSourceChecked,
     state,
     statePath,

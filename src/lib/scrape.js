@@ -18,6 +18,26 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+async function expandFoldedContent(page) {
+  const labels = ['Show more', 'View', 'Yes, view profile', '显示更多', '查看', '展开'];
+  const clicked = [];
+
+  for (const label of labels) {
+    const locator = page.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
+    try {
+      if (await locator.isVisible({ timeout: 250 })) {
+        await locator.click({ timeout: 1000 });
+        clicked.push(label);
+        await sleep(300);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return clicked;
+}
+
 async function listTimelinePostRefs(page, source, config) {
   await page.goto(source.url, {
     waitUntil: 'domcontentloaded',
@@ -39,7 +59,7 @@ async function listTimelinePostRefs(page, source, config) {
     stablePasses = nextCount === count ? stablePasses + 1 : 0;
   }
 
-  const refs = await page.evaluate(({ sourceHandle, maxPosts }) => {
+  return page.evaluate(({ sourceHandle, maxPosts }) => {
     const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     const items = [];
     const seen = new Set();
@@ -85,34 +105,29 @@ async function listTimelinePostRefs(page, source, config) {
     sourceHandle: source.handle,
     maxPosts: source.maxPosts,
   });
-
-  return refs;
 }
 
 async function extractPostDataFromPage(page, source, postRef) {
   return page.evaluate(({ sourceHandle, postId, postUrl }) => {
     const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     const article = articles.find((candidate) => {
-      return Array.from(candidate.querySelectorAll('a[href*="/status/"]'))
-        .some((anchor) => {
-          const href = anchor.getAttribute('href') || '';
-          const samePost = href.includes(`/status/${postId}`);
-          const sameHandle = sourceHandle ? href.includes(`/${sourceHandle}/status/`) : true;
-          return samePost && sameHandle;
-        });
+      return Array.from(candidate.querySelectorAll('a[href*="/status/"]')).some((anchor) => {
+        const href = anchor.getAttribute('href') || '';
+        const samePost = href.includes(`/status/${postId}`);
+        const sameHandle = sourceHandle ? href.includes(`/${sourceHandle}/status/`) : true;
+        return samePost && sameHandle;
+      });
     });
 
     if (!article) {
       return null;
     }
 
-    const hrefs = Array.from(article.querySelectorAll('a[href]')).map((anchor) => {
-      return {
-        url: anchor.href,
-        text: (anchor.textContent || '').trim(),
-        ariaLabel: anchor.getAttribute('aria-label') || '',
-      };
-    });
+    const hrefs = Array.from(article.querySelectorAll('a[href]')).map((anchor) => ({
+      url: anchor.href,
+      text: (anchor.textContent || '').trim(),
+      ariaLabel: anchor.getAttribute('aria-label') || '',
+    }));
 
     const imageUrls = Array.from(article.querySelectorAll('img[src*="pbs.twimg.com/media"]'))
       .map((img) => img.src)
@@ -147,12 +162,8 @@ async function extractPostDataFromPage(page, source, postRef) {
       quotedPostUrls: hrefs
         .map((item) => item.url)
         .filter((url) => /\/status\/\d+/.test(url) && !url.includes(`/status/${postId}`)),
-      hashtags: hrefs
-        .map((item) => item.text)
-        .filter((text) => text.startsWith('#')),
-      mentions: hrefs
-        .map((item) => item.text)
-        .filter((text) => text.startsWith('@')),
+      hashtags: hrefs.map((item) => item.text).filter((text) => text.startsWith('#')),
+      mentions: hrefs.map((item) => item.text).filter((text) => text.startsWith('@')),
     };
   }, {
     sourceHandle: source.handle,
@@ -210,6 +221,7 @@ async function collectPostSnapshot(page, source, postRef, config) {
     timeout: config.network.timeoutMs,
   });
   await sleep(config.collection.waitAfterNavigationMs);
+  const expandActions = await expandFoldedContent(page);
 
   const extracted = await extractPostDataFromPage(page, source, postRef);
   if (!extracted) {
@@ -247,6 +259,10 @@ async function collectPostSnapshot(page, source, postRef, config) {
       screenshotPath: null,
       articleSnapshotPath: null,
       pageSnapshotPath: null,
+    },
+    uiState: {
+      expandActions,
+      hadFoldIndicators: expandActions.length > 0,
     },
   };
 }

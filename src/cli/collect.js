@@ -5,12 +5,24 @@ const { makeStorage } = require('../lib/storage');
 const { createPostgresStore } = require('../lib/postgres');
 const { listTimelinePostRefs, collectPostSnapshot } = require('../lib/scrape');
 const { translatePost } = require('../lib/llm');
+const { createAlertDispatcher } = require('../lib/alerts');
 const { sleep } = require('../lib/utils');
 
-async function collectSource(timelinePage, detailPage, source, config, storage) {
+async function collectSource(timelinePage, detailPage, source, config, storage, postgresStore, alertDispatcher) {
+  if (postgresStore) {
+    await postgresStore.saveSourceProfile({
+      sourceId: source.id,
+      sourceLabel: source.label,
+      sourceUrl: source.url,
+      authorHandle: source.handle,
+      enabled: source.enabled,
+    });
+  }
+
   const postRefs = await listTimelinePostRefs(timelinePage, source, config);
   const newPosts = [];
   const skippedPosts = [];
+  const alerts = [];
 
   for (const postRef of postRefs) {
     if (await storage.hasPost(source, postRef.postId)) {
@@ -21,6 +33,8 @@ async function collectSource(timelinePage, detailPage, source, config, storage) 
     const snapshot = await collectPostSnapshot(detailPage, source, postRef, config);
     const translation = await translatePost(config, snapshot);
     const stored = await storage.storePost(source, snapshot, translation, detailPage);
+    const sentAlerts = await alertDispatcher.process(source, snapshot, translation);
+    alerts.push(...sentAlerts);
 
     newPosts.push({
       postId: snapshot.postId,
@@ -30,6 +44,8 @@ async function collectSource(timelinePage, detailPage, source, config, storage) 
       translated: Boolean(translation && translation.translatedText),
       mediaCount: snapshot.media.images.length,
       linkCount: snapshot.links.length,
+      alerts: sentAlerts.map((item) => item.ruleId),
+      hadFoldIndicators: Boolean(snapshot.uiState?.hadFoldIndicators),
     });
   }
 
@@ -47,6 +63,7 @@ async function collectSource(timelinePage, detailPage, source, config, storage) 
     checkedPosts: postRefs.length,
     newPosts,
     skippedPosts,
+    alerts,
   };
 }
 
@@ -60,6 +77,7 @@ async function main() {
 
   const postgresStore = await createPostgresStore(config);
   const storage = await makeStorage(config, postgresStore);
+  const alertDispatcher = createAlertDispatcher(config, storage, postgresStore);
   const { context, launchMode, fallbackError, close } = await launchAuthenticatedContext(config);
 
   try {
@@ -85,7 +103,15 @@ async function main() {
 
     const sourceResults = [];
     for (const source of config.enabledSources) {
-      sourceResults.push(await collectSource(timelinePage, detailPage, source, config, storage));
+      sourceResults.push(await collectSource(
+        timelinePage,
+        detailPage,
+        source,
+        config,
+        storage,
+        postgresStore,
+        alertDispatcher
+      ));
     }
 
     const summary = {

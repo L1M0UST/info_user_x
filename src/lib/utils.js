@@ -21,6 +21,13 @@ function normalizeWhitespace(text) {
     .trim();
 }
 
+function stripThinkTags(text) {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .trim();
+}
+
 function normalizeXUrl(rawUrl) {
   const url = new URL(rawUrl);
   if (url.hostname === 'twitter.com' || url.hostname.endsWith('.twitter.com')) {
@@ -52,7 +59,7 @@ function parseXHandleFromUrl(rawUrl) {
 }
 
 function extractJsonObject(text) {
-  const trimmed = String(text || '').trim();
+  const trimmed = stripThinkTags(String(text || '').trim());
   const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const source = fencedMatch ? fencedMatch[1].trim() : trimmed;
 
@@ -106,8 +113,7 @@ function rewriteTwitterMediaUrl(url) {
 function safeExtensionFromUrl(fileUrl) {
   try {
     const pathname = new URL(fileUrl).pathname;
-    const extension = path.extname(pathname);
-    return extension || '';
+    return path.extname(pathname) || '';
   } catch {
     return '';
   }
@@ -140,4 +146,5 @@ module.exports = {
   safeExtensionFromUrl,
   sanitizeSlug,
   sleep,
+  stripThinkTags,
 };

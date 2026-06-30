@@ -40,7 +40,25 @@
     "retries": 2,
     "temperature": 0.1,
     "maxCompletionTokens": 1200,
-    "useForExtractionFallback": true
+    "useForExtractionFallback": true,
+    "removeThinkTags": true
+  },
+  "alerts": {
+    "enabled": true,
+    "dingtalk": {
+      "webhook": "",
+      "secret": ""
+    },
+    "rules": [
+      {
+        "id": "china-related",
+        "label": "China Related",
+        "enabled": true,
+        "severity": "high",
+        "pattern": "(中国|China|Chinese|CN\\b|上海|北京|深圳|香港|台湾|Shanghai|Beijing|Shenzhen|Hong\\s*Kong|Taiwan)",
+        "flags": "i"
+      }
+    ]
   },
   "storage": {
     "rootDir": "E:\\code\\py\\info_user_x\\data",
@@ -55,7 +73,8 @@
     "database": "postgres",
     "user": "taishi",
     "passwordEnv": "PGPASSWORD",
-    "schema": "info_user_x"
+    "schema": "info_user_x",
+    "ssl": false
   },
   "schedule": {
     "enabled": true,
@@ -64,6 +83,13 @@
     "linuxCron": "30 8 * * *"
   },
   "sources": [
+    {
+      "id": "h4ckmanac",
+      "label": "H4ckmanac",
+      "enabled": true,
+      "url": "https://x.com/H4ckmanac",
+      "maxPosts": 5
+    },
     {
       "id": "dailydarkweb",
       "label": "DailyDarkWeb",

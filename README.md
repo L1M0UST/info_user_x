@@ -1,222 +1,172 @@
 # info_user_x
 
-Use a logged-in X browser session to collect posts from exact profile URLs, keep reproducible local snapshots, translate the text with an OpenAI-compatible API, and optionally mirror dedupe state into PostgreSQL.
+Collect posts from exact X profile URLs, archive reproducible snapshots locally, translate content through an OpenAI-compatible LLM endpoint, trigger DingTalk alerts for China-related matches, and optionally persist dedupe state into PostgreSQL.
 
-## What Changed
+## Current Status
 
-This project now uses:
+This project now supports:
 
-- exact source URLs instead of only `authors`
-- Playwright as the browser engine
+- exact `sources` URLs instead of loose author names
+- `Playwright` collection with your real X login
+- Linux headless reuse through exported `storage-state.json`
 - original text plus translated text
-- HTML snapshots plus screenshots
-- media downloads for images
-- strict local dedupe
-- optional PostgreSQL persistence
-- proxy support for local `7890`
-- Linux migration support through exported `storage-state.json`
+- HTML snapshot plus screenshot plus downloaded images
+- folded-post expansion attempts before capture
+- DingTalk alerting with regex rules
+- local archive files designed for later SFTP or FTP based ingestion
+- optional PostgreSQL schema initialization and dedupe persistence
 
-## Current Design Answers
+## Main Questions Answered
 
-### 1. How posts are viewed and identified
+### 1. How Linux without GUI logs in to X
 
-The collector uses `Playwright` with your logged-in browser session.
+Recommended supported path:
 
-It works in two stages:
-
-- open the exact source timeline URL from `config.json`
-- collect tweet permalinks from the timeline
-- open each permalink page to extract the full post snapshot
-
-Resources are identified from the tweet DOM:
-
-- text from the tweet text block
-- links from anchors inside the tweet article
-- images from `pbs.twimg.com/media`
-- video presence from the video player container
-- canonical URL and timestamp from the tweet page itself
-
-### 2. How a collected post is reproduced
-
-Each post folder stores enough material to reproduce the post later:
-
-- `original.txt`
-- `translated.zh-CN.txt`
-- `translation.json`
-- `post.json`
-- `article.html`
-- `page.html`
-- `tweet.png`
-- `media/`
-- `links.json`
-
-### 3. Links, images, and language
-
-- links are saved in `links.json`
-- image URLs are downloaded into `media/`
-- the original text is always kept in `original.txt`
-- the translated text is written to `translated.zh-CN.txt`
-
-Translation uses an OpenAI-compatible endpoint and defaults to:
-
-- model: `MiniMax-M3`
-- base URL: `https://api.minimax.io/v1`
-- API key source: environment variable `MINIMAX_API_KEY`
-
-### 4. Snapshot support
-
-Yes.
-
-Each post has:
-
-- screenshot snapshot: `tweet.png`
-- article HTML snapshot: `article.html`
-- page HTML snapshot: `page.html`
-
-### 5. Why Playwright
-
-Current engine:
-
-- `Playwright`
-
-Practical judgment:
-
-- better than stock Selenium for real-profile reuse
-- easier to keep stable than DrissionPage in a cross-platform project
-- still not undetectable
-
-There is no automation stack with guaranteed lowest detection. This project currently prefers `Playwright + real browser profile`.
-
-### 6. Exact URL source list
-
-Done.
-
-The project now uses `sources` with exact URLs:
-
-```json
-{
-  "id": "dailydarkweb",
-  "label": "DailyDarkWeb",
-  "enabled": true,
-  "url": "https://x.com/DailyDarkWeb",
-  "maxPosts": 5
-}
-```
-
-### 7. Storage for later analysis
-
-Storage is optimized for both replay and analysis:
-
-- local text files for quick reading
-- JSON metadata for parsing
-- screenshots and HTML for replay
-- downloaded images for media preservation
-
-### 8. Dedupe
-
-Dedupe key:
-
-- `source.id + postId`
-
-The same post is only archived once.
-
-### 9. Can it monitor bot accounts
-
-Yes, if:
-
-- the target page is reachable by your logged-in session
-- the posts are visible to that account
-
-### 10. MiniMax integration
-
-Done in OpenAI-compatible form.
-
-Set your API key yourself:
+1. On a machine where you can already log in, run:
 
 ```powershell
-$env:MINIMAX_API_KEY="your_api_key"
+npm run auth:export
 ```
 
-### 11. LLM output cleaning
+2. Copy the generated `data/runtime/storage-state.json` to the Linux server.
 
-Done.
+3. On Linux, import it or point config directly at it:
 
-The translation pipeline:
-
-- forces JSON-only output
-- extracts JSON if the model adds noise
-- validates required fields before storing
-
-### 12. PostgreSQL
-
-Optional support is included.
-
-Current defaults:
-
-- database: `postgres`
-- user: `taishi`
-- schema: `info_user_x`
-
-Enable it in `config.json`:
-
-```json
-"database": {
-  "enabled": true,
-  "optional": true,
-  "host": "127.0.0.1",
-  "port": 5432,
-  "database": "postgres",
-  "user": "taishi",
-  "passwordEnv": "PGPASSWORD",
-  "schema": "info_user_x"
-}
+```bash
+npm run auth:import -- /srv/info_user_x/data/runtime/storage-state.json
 ```
 
-### 13. GitHub target
-
-Target repo:
-
-- [L1M0UST/info_user_x](https://github.com/L1M0UST/info_user_x)
-
-This local directory was not originally a Git repository, so it still needs `git init`, remote binding, and push.
-
-### 14. Proxy
-
-Proxy is built in:
-
-- `http://127.0.0.1:7890`
-
-It is used for:
-
-- browser launch
-- media downloads
-- LLM HTTP requests
-
-### 15. Linux server path
-
-For Linux later:
-
-1. Run once on Windows and export `storage-state.json`
-2. Copy the project and `data/runtime/storage-state.json` to Linux
-3. Change config:
+4. Switch config:
 
 ```json
 "browser": {
   "authStrategy": "storage_state",
   "storageStatePath": "/srv/info_user_x/data/runtime/storage-state.json",
-  "executablePath": "/usr/bin/google-chrome",
   "headless": true
 }
 ```
 
-## Key Files
+There is no fully reliable “username/password headless login” implementation for X that is better than migrating an authenticated storage state, especially when MFA or anti-bot checks appear.
+
+### 2. China-related DingTalk alerts
+
+Supported.
+
+Alert flow:
+
+- regex rules match the original text, translated text, links, source label, and post URL
+- matched posts send a DingTalk markdown message
+- alert dedupe key is `source.id + postId + ruleId`
+
+Fill these yourself in `config.json`:
+
+```json
+"alerts": {
+  "enabled": true,
+  "dingtalk": {
+    "webhook": "",
+    "secret": ""
+  }
+}
+```
+
+### 3. Your high-priority sources
+
+Already placed in local config:
+
+- `https://x.com/H4ckmanac`
+- `https://x.com/DailyDarkWeb`
+
+### 4. Folded posts and snapshots
+
+Folded or warning-style post states can affect both screenshots and extracted text.
+
+Current mitigation:
+
+- the collector opens the permalink page, not just the timeline card
+- before extraction it tries to click common fold-expansion buttons such as `Show more`, `View`, `Yes, view profile`
+- the result is recorded in `uiState.hadFoldIndicators` and `uiState.expandActions`
+
+That means later you can tell whether a post needed expansion before snapshotting.
+
+### 5. Local storage for later model parsing and cross-machine transfer
+
+Yes.
+
+Every post now writes:
+
+- `original.txt`
+- `translated.zh-CN.txt`
+- `translation.json`
+- `post.json`
+- `ingest-record.json`
+- `article.html`
+- `page.html`
+- `tweet.png`
+- `links.json`
+- `media/*`
+
+For downstream machine consumption, each run also exports:
+
+- `data/exports/<run_id>/posts.ndjson`
+- `data/exports/<run_id>/manifest.json`
+
+This is specifically meant to be easy to move by SFTP first, then consumed later by another machine over FTP.
+
+### 6. Downstream LLM cleaning compatibility
+
+The project now cleans model output for OpenAI-compatible APIs and removes noisy think blocks:
+
+- `<think>...</think>`
+- `<thinking>...</thinking>`
+
+That makes it safer for both:
+
+- MiniMax 3 style translation on the collector
+- MiniMax 2.7 or Qwen style downstream cleaning on another machine
+
+### 7. PostgreSQL table design
+
+Current schema initialization creates:
+
+- `source_profiles`
+- `posts`
+- `alerts`
+- `runs`
+- `ingest_jobs`
+
+Recommended meanings:
+
+- `source_profiles`: tracked source metadata
+- `posts`: canonical archived posts and dedupe authority
+- `alerts`: alert delivery records
+- `runs`: one collection run summary per execution
+- `ingest_jobs`: downstream cleaning or ingestion state machine
+
+### 8. PostgreSQL dedupe setup
+
+Dedupe key:
+
+- `canonical_key = source.id + ":" + postId`
+
+This key is the primary key of `posts`.
+
+Initialize schema after filling PG config:
+
+```powershell
+npm run db:init
+```
+
+## Important Files
 
 - local config: [config.json](/E:/code/py/info_user_x/config.json)
 - config template: [config.example.json](/E:/code/py/info_user_x/config.example.json)
-- config: [config.json](/E:/code/py/info_user_x/config.json)
-- collection entry: [src/cli/collect.js](/E:/code/py/info_user_x/src/cli/collect.js)
+- collector entry: [src/cli/collect.js](/E:/code/py/info_user_x/src/cli/collect.js)
 - login check: [src/cli/check-login.js](/E:/code/py/info_user_x/src/cli/check-login.js)
-- architecture summary: [ARCHITECTURE.md](/E:/code/py/info_user_x/ARCHITECTURE.md)
+- auth export: [src/cli/export-auth.js](/E:/code/py/info_user_x/src/cli/export-auth.js)
+- auth import: [src/cli/import-auth.js](/E:/code/py/info_user_x/src/cli/import-auth.js)
+- PG init: [src/cli/db-init.js](/E:/code/py/info_user_x/src/cli/db-init.js)
+- architecture: [ARCHITECTURE.md](/E:/code/py/info_user_x/ARCHITECTURE.md)
 
 ## Commands
 
@@ -236,6 +186,24 @@ Collect posts:
 
 ```powershell
 npm run collect:x
+```
+
+Export auth for Linux:
+
+```powershell
+npm run auth:export
+```
+
+Import auth bundle:
+
+```powershell
+npm run auth:import -- E:\path\to\storage-state.json
+```
+
+Initialize PostgreSQL schema:
+
+```powershell
+npm run db:init
 ```
 
 Set MiniMax API key:
