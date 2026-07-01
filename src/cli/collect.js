@@ -30,7 +30,7 @@ async function collectSource(timelinePage, detailPage, source, config, storage, 
       continue;
     }
 
-    const snapshot = await collectPostSnapshot(detailPage, source, postRef, config);
+    const snapshot = await collectPostSnapshot(detailPage, source, postRef, config, timelinePage);
     const translation = await translatePost(config, snapshot);
     const stored = await storage.storePost(source, snapshot, translation, detailPage);
     const sentAlerts = await alertDispatcher.process(source, snapshot, translation);

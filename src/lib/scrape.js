@@ -39,6 +39,17 @@ async function waitForPostReady(page, config) {
   return null;
 }
 
+function buildCandidatePostUrls(source, postRef) {
+  const urls = [
+    postRef.postUrl,
+    `https://x.com/i/web/status/${postRef.postId}`,
+    `https://twitter.com/${source.handle || ''}/status/${postRef.postId}`.replace(/\/{2,}/g, '/').replace('https:/', 'https://'),
+    `https://twitter.com/i/web/status/${postRef.postId}`,
+  ];
+
+  return [...new Set(urls)];
+}
+
 async function expandFoldedContent(page) {
   const labels = ['Show more', 'View', 'Yes, view profile', '显示更多', '查看', '展开'];
   const clicked = [];
@@ -225,6 +236,14 @@ async function extractPostDataFromPage(page, source, postRef) {
   });
 }
 
+async function tryExtractFromCurrentPage(page, source, postRef, config) {
+  await waitForPostReady(page, config);
+  await sleep(config.collection.waitAfterNavigationMs);
+  const expandActions = await expandFoldedContent(page);
+  const extracted = await extractPostDataFromPage(page, source, postRef);
+  return { expandActions, extracted };
+}
+
 async function captureArticleScreenshot(page, source, postId, postDir) {
   const selector = `article[data-testid="tweet"]:has(a[href*="/status/${postId}"])`;
   const locator = page.locator(selector).first();
@@ -275,29 +294,47 @@ async function downloadImages(imageUrls, mediaDir, config) {
   return results;
 }
 
-async function collectPostSnapshot(page, source, postRef, config) {
-  await page.goto(postRef.postUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout: config.network.timeoutMs,
-  });
-  await waitForPostReady(page, config);
-
+async function collectPostSnapshot(page, source, postRef, config, fallbackTimelinePage) {
   let expandActions = [];
   let extracted = null;
   let lastDiagnostics = null;
+  const triedUrls = [];
+  let captureMode = 'detail';
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await sleep(config.collection.waitAfterNavigationMs + attempt * 1000);
-    expandActions = await expandFoldedContent(page);
-    extracted = await extractPostDataFromPage(page, source, postRef);
+  for (const candidateUrl of buildCandidatePostUrls(source, postRef)) {
+    triedUrls.push(candidateUrl);
+    await page.goto(candidateUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: config.network.timeoutMs,
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await tryExtractFromCurrentPage(page, source, postRef, config);
+      expandActions = result.expandActions;
+      extracted = result.extracted;
+
+      if (extracted?.found) {
+        break;
+      }
+
+      lastDiagnostics = extracted?.diagnostics || null;
+      await page.mouse.wheel(0, -1200);
+      await sleep(500 + attempt * 500);
+    }
 
     if (extracted?.found) {
       break;
     }
+  }
 
-    lastDiagnostics = extracted?.diagnostics || null;
-    await page.mouse.wheel(0, -1200);
-    await sleep(500);
+  if (!extracted?.found && fallbackTimelinePage) {
+    const timelineResult = await tryExtractFromCurrentPage(fallbackTimelinePage, source, postRef, config);
+    expandActions = timelineResult.expandActions;
+    extracted = timelineResult.extracted;
+    captureMode = 'timeline_fallback';
+    if (!extracted?.found) {
+      lastDiagnostics = extracted?.diagnostics || null;
+    }
   }
 
   if (!extracted?.found) {
@@ -315,6 +352,7 @@ async function collectPostSnapshot(page, source, postRef, config) {
       sourceId: source.id,
       sourceUrl: source.url,
       postRef,
+      triedUrls,
       pageUrl: page.url(),
       pageTitle: await page.title(),
       expandActions,
@@ -362,6 +400,8 @@ async function collectPostSnapshot(page, source, postRef, config) {
       expandActions,
       hadFoldIndicators: expandActions.length > 0,
       articleMatchReason: extracted.matchReason,
+      captureMode,
+      triedUrls,
     },
   };
 }
