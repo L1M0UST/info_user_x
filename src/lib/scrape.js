@@ -18,6 +18,27 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+async function waitForPostReady(page, config) {
+  const selectors = [
+    '[data-testid="primaryColumn"]',
+    'article[data-testid="tweet"]',
+    '[data-testid="tweetText"]',
+  ];
+
+  for (const selector of selectors) {
+    try {
+      await page.waitForSelector(selector, {
+        timeout: Math.min(config.network.timeoutMs, 12000),
+      });
+      return selector;
+    } catch {
+      // try next selector
+    }
+  }
+
+  return null;
+}
+
 async function expandFoldedContent(page) {
   const labels = ['Show more', 'View', 'Yes, view profile', '显示更多', '查看', '展开'];
   const clicked = [];
@@ -110,7 +131,7 @@ async function listTimelinePostRefs(page, source, config) {
 async function extractPostDataFromPage(page, source, postRef) {
   return page.evaluate(({ sourceHandle, postId, postUrl }) => {
     const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
-    const article = articles.find((candidate) => {
+    const exactArticle = articles.find((candidate) => {
       return Array.from(candidate.querySelectorAll('a[href*="/status/"]')).some((anchor) => {
         const href = anchor.getAttribute('href') || '';
         const samePost = href.includes(`/status/${postId}`);
@@ -119,8 +140,32 @@ async function extractPostDataFromPage(page, source, postRef) {
       });
     });
 
+    const samePostAnyHandleArticle = articles.find((candidate) => {
+      return Array.from(candidate.querySelectorAll('a[href*="/status/"]')).some((anchor) => {
+        const href = anchor.getAttribute('href') || '';
+        return href.includes(`/status/${postId}`);
+      });
+    });
+
+    const primaryColumn = document.querySelector('[data-testid="primaryColumn"]');
+    const primaryColumnArticle = primaryColumn
+      ? Array.from(primaryColumn.querySelectorAll('article[data-testid="tweet"]'))
+        .find((candidate) => candidate.querySelector('[data-testid="tweetText"], time'))
+      : null;
+
+    const firstTweetArticle = articles.find((candidate) => candidate.querySelector('[data-testid="tweetText"], time'));
+    const article = exactArticle || samePostAnyHandleArticle || primaryColumnArticle || firstTweetArticle || null;
+
     if (!article) {
-      return null;
+      return {
+        found: false,
+        diagnostics: {
+          articleCount: articles.length,
+          primaryColumnExists: Boolean(primaryColumn),
+          title: document.title,
+          url: window.location.href,
+        },
+      };
     }
 
     const hrefs = Array.from(article.querySelectorAll('a[href]')).map((anchor) => ({
@@ -144,6 +189,14 @@ async function extractPostDataFromPage(page, source, postRef) {
     );
 
     return {
+      found: true,
+      matchReason: exactArticle
+        ? 'exact_handle_and_post'
+        : samePostAnyHandleArticle
+          ? 'same_post_any_handle'
+          : primaryColumnArticle
+            ? 'primary_column_fallback'
+            : 'first_tweet_fallback',
       postId,
       postUrl,
       canonicalUrl: window.location.href,
@@ -175,13 +228,20 @@ async function extractPostDataFromPage(page, source, postRef) {
 async function captureArticleScreenshot(page, source, postId, postDir) {
   const selector = `article[data-testid="tweet"]:has(a[href*="/status/${postId}"])`;
   const locator = page.locator(selector).first();
-  if ((await locator.count()) < 1) {
-    return null;
+  if ((await locator.count()) >= 1) {
+    const outputPath = path.join(postDir, 'tweet.png');
+    await locator.screenshot({ path: outputPath });
+    return outputPath;
   }
 
-  const outputPath = path.join(postDir, 'tweet.png');
-  await locator.screenshot({ path: outputPath });
-  return outputPath;
+  const fallbackLocator = page.locator('[data-testid="primaryColumn"] article[data-testid="tweet"]').first();
+  if ((await fallbackLocator.count()) >= 1) {
+    const outputPath = path.join(postDir, 'tweet.png');
+    await fallbackLocator.screenshot({ path: outputPath });
+    return outputPath;
+  }
+
+  return null;
 }
 
 async function downloadImages(imageUrls, mediaDir, config) {
@@ -220,12 +280,50 @@ async function collectPostSnapshot(page, source, postRef, config) {
     waitUntil: 'domcontentloaded',
     timeout: config.network.timeoutMs,
   });
-  await sleep(config.collection.waitAfterNavigationMs);
-  const expandActions = await expandFoldedContent(page);
+  await waitForPostReady(page, config);
 
-  const extracted = await extractPostDataFromPage(page, source, postRef);
-  if (!extracted) {
-    throw new Error(`Failed to locate target tweet article for ${postRef.postUrl}`);
+  let expandActions = [];
+  let extracted = null;
+  let lastDiagnostics = null;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await sleep(config.collection.waitAfterNavigationMs + attempt * 1000);
+    expandActions = await expandFoldedContent(page);
+    extracted = await extractPostDataFromPage(page, source, postRef);
+
+    if (extracted?.found) {
+      break;
+    }
+
+    lastDiagnostics = extracted?.diagnostics || null;
+    await page.mouse.wheel(0, -1200);
+    await sleep(500);
+  }
+
+  if (!extracted?.found) {
+    const debugDir = path.join(config.storage.rootDir, 'runs', 'debug');
+    ensureDir(debugDir);
+    const stamp = new Date().toISOString().replace(/[:]/g, '-');
+    const screenshotPath = path.join(debugDir, `collect-failed-${source.id}-${postRef.postId}-${stamp}.png`);
+    const htmlPath = path.join(debugDir, `collect-failed-${source.id}-${postRef.postId}-${stamp}.html`);
+    const jsonPath = path.join(debugDir, `collect-failed-${source.id}-${postRef.postId}-${stamp}.json`);
+
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    fs.writeFileSync(htmlPath, await page.content(), 'utf8');
+    writeJson(jsonPath, {
+      failedAt: new Date().toISOString(),
+      sourceId: source.id,
+      sourceUrl: source.url,
+      postRef,
+      pageUrl: page.url(),
+      pageTitle: await page.title(),
+      expandActions,
+      diagnostics: lastDiagnostics,
+      screenshotPath,
+      htmlPath,
+    });
+
+    throw new Error(`Failed to locate target tweet article for ${postRef.postUrl}; debug: ${jsonPath}`);
   }
 
   return {
@@ -263,6 +361,7 @@ async function collectPostSnapshot(page, source, postRef, config) {
     uiState: {
       expandActions,
       hadFoldIndicators: expandActions.length > 0,
+      articleMatchReason: extracted.matchReason,
     },
   };
 }
