@@ -1,6 +1,6 @@
 # info_user_x
 
-Collect posts from exact X profile URLs, archive reproducible snapshots locally, translate content through an OpenAI-compatible LLM endpoint, trigger DingTalk alerts for China-related matches, and optionally persist dedupe state into PostgreSQL.
+Collect posts from exact X profile URLs, archive reproducible snapshots locally, translate content through an OpenAI-compatible LLM endpoint, trigger Telegram and DingTalk alerts for China-related matches, and optionally persist dedupe state into PostgreSQL.
 
 ## Current Status
 
@@ -12,7 +12,7 @@ This project now supports:
 - original text plus translated text
 - HTML snapshot plus screenshot plus downloaded images
 - folded-post expansion attempts before capture
-- DingTalk alerting with regex rules
+- Telegram and DingTalk alerting with regex rules
 - local archive files designed for later SFTP or FTP based ingestion
 - optional PostgreSQL schema initialization and dedupe persistence
 
@@ -48,27 +48,46 @@ npm run auth:import -- /srv/info_user_x/data/runtime/storage-state.json
 
 There is no fully reliable “username/password headless login” implementation for X that is better than migrating an authenticated storage state, especially when MFA or anti-bot checks appear.
 
-### 2. China-related DingTalk alerts
+### 2. China-related Telegram and DingTalk alerts
 
 Supported.
 
 Alert flow:
 
+- only newly collected posts enter the alert pipeline
 - regex rules match the original text, translated text, links, source label, and post URL
-- matched posts send a DingTalk markdown message
-- alert dedupe key is `source.id + postId + ruleId`
+- matched posts send to Telegram and/or DingTalk, depending on `notifyChannels`
+- alert dedupe key is `source.id + postId + ruleId + channel`
+- `chongqing-priority` is a stronger rule than the general China rule
 
 Fill these yourself in `config.json`:
 
 ```json
 "alerts": {
   "enabled": true,
-  "dingtalk": {
-    "webhook": "",
-    "secret": ""
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botTokenEnv": "TELEGRAM_BOT_TOKEN",
+      "chatIdEnv": "TELEGRAM_CHAT_ID",
+      "messageThreadIdEnv": "TELEGRAM_MESSAGE_THREAD_ID"
+    },
+    "dingtalk": {
+      "enabled": true,
+      "webhookEnv": "DINGTALK_WEBHOOK",
+      "secretEnv": "DINGTALK_SECRET"
+    }
   }
 }
 ```
+
+Alert message content:
+
+- severity, rule, source, post time, post URL, canonical key
+- local archive path when available
+- original excerpt
+- translated excerpt when translation exists
+- extracted links and video post URL when present
 
 ### 3. Your high-priority sources
 
@@ -210,4 +229,14 @@ Set MiniMax API key:
 
 ```powershell
 $env:MINIMAX_API_KEY="your_api_key"
+```
+
+Set Telegram and DingTalk env vars:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN="your_bot_token"
+$env:TELEGRAM_CHAT_ID="your_chat_id"
+$env:TELEGRAM_MESSAGE_THREAD_ID="optional_topic_id"
+$env:DINGTALK_WEBHOOK="your_dingtalk_webhook"
+$env:DINGTALK_SECRET="your_dingtalk_secret"
 ```

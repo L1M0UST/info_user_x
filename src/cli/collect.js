@@ -33,7 +33,7 @@ async function collectSource(timelinePage, detailPage, source, config, storage, 
     const snapshot = await collectPostSnapshot(detailPage, source, postRef, config, timelinePage);
     const translation = await translatePost(config, snapshot);
     const stored = await storage.storePost(source, snapshot, translation, detailPage);
-    const sentAlerts = await alertDispatcher.process(source, snapshot, translation);
+    const sentAlerts = await alertDispatcher.process(source, snapshot, translation, stored);
     alerts.push(...sentAlerts);
 
     newPosts.push({
@@ -44,7 +44,11 @@ async function collectSource(timelinePage, detailPage, source, config, storage, 
       translated: Boolean(translation && translation.translatedText),
       mediaCount: snapshot.media.images.length,
       linkCount: snapshot.links.length,
-      alerts: sentAlerts.map((item) => item.ruleId),
+      alerts: sentAlerts.map((item) => ({
+        ruleId: item.ruleId,
+        severity: item.severity,
+        deliveredChannels: item.deliveredChannels,
+      })),
       hadFoldIndicators: Boolean(snapshot.uiState?.hadFoldIndicators),
     });
   }

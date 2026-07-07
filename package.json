@@ -1,6 +1,6 @@
 {
   "name": "info_user_x",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "main": "src/cli/collect.js",
   "scripts": {
     "check:x": "node src/cli/check-login.js",
@@ -15,7 +15,8 @@
     "archive",
     "translation",
     "postgres",
-    "dingtalk"
+    "dingtalk",
+    "telegram"
   ],
   "author": "",
   "license": "ISC",

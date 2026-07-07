@@ -75,9 +75,24 @@ function getDefaults() {
     },
     alerts: {
       enabled: true,
-      dingtalk: {
-        webhook: '',
-        secret: '',
+      channels: {
+        telegram: {
+          enabled: true,
+          botToken: '',
+          botTokenEnv: 'TELEGRAM_BOT_TOKEN',
+          chatId: '',
+          chatIdEnv: 'TELEGRAM_CHAT_ID',
+          disableWebPagePreview: true,
+          messageThreadId: '',
+          messageThreadIdEnv: 'TELEGRAM_MESSAGE_THREAD_ID',
+        },
+        dingtalk: {
+          enabled: true,
+          webhook: '',
+          webhookEnv: 'DINGTALK_WEBHOOK',
+          secret: '',
+          secretEnv: 'DINGTALK_SECRET',
+        },
       },
       rules: [
         {
@@ -85,8 +100,20 @@ function getDefaults() {
           label: 'China Related',
           enabled: true,
           severity: 'high',
-          pattern: '(中国|China|Chinese|CN\\b|上海|北京|深圳|香港|台湾|Shanghai|Beijing|Shenzhen|Hong\\s*Kong|Taiwan)',
+          pattern: '(\\u4e2d\\u56fd|China|Chinese|CN\\b|\\u4e0a\\u6d77|\\u5317\\u4eac|\\u6df1\\u5733|\\u9999\\u6e2f|\\u53f0\\u6e7e|Shanghai|Beijing|Shenzhen|Hong\\s*Kong|Taiwan)',
           flags: 'i',
+          tags: ['china'],
+          notifyChannels: ['telegram', 'dingtalk'],
+        },
+        {
+          id: 'chongqing-priority',
+          label: 'Chongqing Priority',
+          enabled: true,
+          severity: 'critical',
+          pattern: '(\\u91cd\\u5e86|\\u91cd\\u6176|Chongqing)',
+          flags: 'i',
+          tags: ['china', 'chongqing'],
+          notifyChannels: ['telegram', 'dingtalk'],
         },
       ],
     },
@@ -113,6 +140,34 @@ function getDefaults() {
       linuxCron: '30 8 * * *',
     },
     sources: [],
+  };
+}
+
+function normalizeAlertsConfig(alerts) {
+  const channels = alerts?.channels || {};
+  const legacyDingTalk = alerts?.dingtalk || {};
+
+  return {
+    ...alerts,
+    channels: {
+      telegram: {
+        enabled: channels.telegram?.enabled !== false,
+        botToken: channels.telegram?.botToken || '',
+        botTokenEnv: channels.telegram?.botTokenEnv || 'TELEGRAM_BOT_TOKEN',
+        chatId: channels.telegram?.chatId || '',
+        chatIdEnv: channels.telegram?.chatIdEnv || 'TELEGRAM_CHAT_ID',
+        disableWebPagePreview: channels.telegram?.disableWebPagePreview !== false,
+        messageThreadId: channels.telegram?.messageThreadId || '',
+        messageThreadIdEnv: channels.telegram?.messageThreadIdEnv || 'TELEGRAM_MESSAGE_THREAD_ID',
+      },
+      dingtalk: {
+        enabled: channels.dingtalk?.enabled !== false,
+        webhook: channels.dingtalk?.webhook || legacyDingTalk.webhook || '',
+        webhookEnv: channels.dingtalk?.webhookEnv || 'DINGTALK_WEBHOOK',
+        secret: channels.dingtalk?.secret || legacyDingTalk.secret || '',
+        secretEnv: channels.dingtalk?.secretEnv || 'DINGTALK_SECRET',
+      },
+    },
   };
 }
 
@@ -164,6 +219,7 @@ function loadConfig() {
 
   return {
     ...merged,
+    alerts: normalizeAlertsConfig(merged.alerts),
     sources: normalizedSources,
     enabledSources,
     projectRoot,
