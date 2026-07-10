@@ -1,0 +1,37 @@
+{
+  "ftp": {
+    "host": "127.0.0.1",
+    "port": 21,
+    "username": "ftp_user",
+    "password": "ftp_password",
+    "remoteDir": "/info_user_x/inbox",
+    "passive": true,
+    "timeoutSeconds": 60
+  },
+  "runtime": {
+    "baseDir": "./runtime",
+    "downloadsDir": "./runtime/downloads",
+    "archiveDir": "./runtime/archive",
+    "statePath": "./runtime/state.json",
+    "logPath": "./runtime/ingest.log"
+  },
+  "llm": {
+    "enabled": true,
+    "baseUrl": "https://api.minimax.io/v1",
+    "apiKey": "",
+    "apiKeyEnv": "MINIMAX_API_KEY",
+    "model": "MiniMax-M3",
+    "timeoutSeconds": 60,
+    "retries": 2,
+    "temperature": 0.1
+  },
+  "clickhouse": {
+    "host": "127.0.0.1",
+    "port": 8123,
+    "username": "default",
+    "password": "",
+    "database": "default",
+    "table": "data_breach_events_distributed",
+    "secure": false
+  }
+}

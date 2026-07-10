@@ -92,6 +92,22 @@
     "exportStorageStatePath": "E:\\code\\py\\info_user_x\\data\\runtime\\storage-state.json",
     "loginCheckPath": "E:\\code\\py\\info_user_x\\data\\runs\\login-check.json"
   },
+  "handoff": {
+    "enabled": true,
+    "outboxDir": "E:\\code\\py\\info_user_x\\data\\handoff\\outbox",
+    "sentDir": "E:\\code\\py\\info_user_x\\data\\handoff\\sent",
+    "statePath": "E:\\code\\py\\info_user_x\\data\\state\\handoff.json",
+    "sftp": {
+      "enabled": false,
+      "host": "",
+      "port": 22,
+      "username": "",
+      "passwordEnv": "SFTP_PASSWORD",
+      "privateKeyPath": "",
+      "privateKeyPassphraseEnv": "SFTP_PRIVATE_KEY_PASSPHRASE",
+      "remoteDir": "/srv/info_user_x/inbox"
+    }
+  },
   "database": {
     "enabled": false,
     "optional": true,

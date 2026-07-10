@@ -54,20 +54,42 @@ async function expandFoldedContent(page) {
   const labels = ['Show more', 'View', 'Yes, view profile', '显示更多', '查看', '展开'];
   const clicked = [];
 
-  for (const label of labels) {
-    const locator = page.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
-    try {
-      if (await locator.isVisible({ timeout: 250 })) {
-        await locator.click({ timeout: 1000 });
-        clicked.push(label);
-        await sleep(300);
+  for (const role of ['button', 'link']) {
+    for (const label of labels) {
+      const locator = page.getByRole(role, { name: new RegExp(`^${label}$`, 'i') }).first();
+      try {
+        if (await locator.isVisible({ timeout: 250 })) {
+          await locator.click({ timeout: 1000 });
+          clicked.push(`${role}:${label}`);
+          await sleep(300);
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
   }
 
   return clicked;
+}
+
+function analyzeExtractionCompleteness(extracted) {
+  const links = Array.isArray(extracted?.links) ? extracted.links : [];
+  const originalText = String(extracted?.textOriginal || '').trim();
+  const subscribeLink = links.find((item) => /subscribe to unlock/i.test(`${item.text} ${item.ariaLabel}`));
+  const showMoreLink = links.find((item) => /show more|read more|显示更多|展开/i.test(`${item.text} ${item.ariaLabel}`));
+  const hasEllipsis = /…$|\.{3}$/.test(originalText);
+  const likelyTruncated = Boolean(originalText && (hasEllipsis || showMoreLink));
+  const accessRestricted = Boolean(subscribeLink);
+
+  return {
+    likelyTruncated,
+    accessRestricted,
+    reasons: [
+      hasEllipsis ? 'text_ends_with_ellipsis' : null,
+      showMoreLink ? 'show_more_link_present' : null,
+      subscribeLink ? 'subscription_unlock_link_present' : null,
+    ].filter(Boolean),
+  };
 }
 
 async function listTimelinePostRefs(page, source, config) {
@@ -240,7 +262,20 @@ async function tryExtractFromCurrentPage(page, source, postRef, config) {
   await waitForPostReady(page, config);
   await sleep(config.collection.waitAfterNavigationMs);
   const expandActions = await expandFoldedContent(page);
-  const extracted = await extractPostDataFromPage(page, source, postRef);
+  let extracted = await extractPostDataFromPage(page, source, postRef);
+
+  if (extracted?.found) {
+    const completeness = analyzeExtractionCompleteness(extracted);
+    if (completeness.likelyTruncated && !completeness.accessRestricted) {
+      const secondPassActions = await expandFoldedContent(page);
+      if (secondPassActions.length) {
+        expandActions.push(...secondPassActions);
+        await sleep(500);
+        extracted = await extractPostDataFromPage(page, source, postRef);
+      }
+    }
+  }
+
   return { expandActions, extracted };
 }
 
@@ -307,6 +342,9 @@ async function collectPostSnapshot(page, source, postRef, config, fallbackTimeli
       waitUntil: 'domcontentloaded',
       timeout: config.network.timeoutMs,
     });
+    await page.waitForLoadState('networkidle', {
+      timeout: Math.min(config.network.timeoutMs, 8000),
+    }).catch(() => {});
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const result = await tryExtractFromCurrentPage(page, source, postRef, config);
@@ -364,6 +402,8 @@ async function collectPostSnapshot(page, source, postRef, config, fallbackTimeli
     throw new Error(`Failed to locate target tweet article for ${postRef.postUrl}; debug: ${jsonPath}`);
   }
 
+  const completeness = analyzeExtractionCompleteness(extracted);
+
   return {
     sourceId: source.id,
     sourceLabel: source.label,
@@ -402,6 +442,9 @@ async function collectPostSnapshot(page, source, postRef, config, fallbackTimeli
       articleMatchReason: extracted.matchReason,
       captureMode,
       triedUrls,
+      textLikelyTruncated: completeness.likelyTruncated,
+      accessRestricted: completeness.accessRestricted,
+      completenessReasons: completeness.reasons,
     },
   };
 }

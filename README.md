@@ -185,7 +185,46 @@ npm run db:init
 - auth export: [src/cli/export-auth.js](/E:/code/py/info_user_x/src/cli/export-auth.js)
 - auth import: [src/cli/import-auth.js](/E:/code/py/info_user_x/src/cli/import-auth.js)
 - PG init: [src/cli/db-init.js](/E:/code/py/info_user_x/src/cli/db-init.js)
+- handoff prepare: [src/cli/prepare-handoff.js](/E:/code/py/info_user_x/src/cli/prepare-handoff.js)
+- SFTP upload: [src/cli/sftp-push.js](/E:/code/py/info_user_x/src/cli/sftp-push.js)
+- Python downstream: [python_downstream/ftp_pull_and_ingest.py](/E:/code/py/info_user_x/python_downstream/ftp_pull_and_ingest.py)
+- ClickHouse schema: [python_downstream/clickhouse_schema.sql](/E:/code/py/info_user_x/python_downstream/clickhouse_schema.sql)
 - architecture: [ARCHITECTURE.md](/E:/code/py/info_user_x/ARCHITECTURE.md)
+
+## Content Locations
+
+Per-post archive:
+
+- `data/sources/<source_slug>/posts/<yyyy-mm-dd>/<timestamp_postid>/original.txt`
+- `data/sources/<source_slug>/posts/<yyyy-mm-dd>/<timestamp_postid>/translated.zh-CN.txt`
+- `data/sources/<source_slug>/posts/<yyyy-mm-dd>/<timestamp_postid>/post.json`
+- `data/sources/<source_slug>/posts/<yyyy-mm-dd>/<timestamp_postid>/ingest-record.json`
+- `data/sources/<source_slug>/posts/<yyyy-mm-dd>/<timestamp_postid>/tweet.png`
+
+Run-level extraction files for later parsing:
+
+- `data/exports/<run_id>/posts.ndjson`
+- `data/exports/<run_id>/manifest.json`
+
+SFTP-ready flat handoff files:
+
+- `data/handoff/outbox/info_user_x_<run_id>.posts.ndjson`
+- `data/handoff/outbox/info_user_x_<run_id>.manifest.json`
+
+If you want the exact downstream extraction content, the primary file is:
+
+- `data/exports/<run_id>/posts.ndjson`
+
+Each line is one JSON record containing:
+
+- source metadata
+- original text
+- translated text
+- links
+- hashtags
+- quoted post URLs
+- collected time
+- a combined `rawContentForLLM` field for downstream extraction
 
 ## Commands
 
@@ -225,6 +264,24 @@ Initialize PostgreSQL schema:
 npm run db:init
 ```
 
+Prepare handoff files:
+
+```powershell
+npm run prepare:handoff
+```
+
+Push handoff files to your SFTP server:
+
+```powershell
+npm run push:sftp
+```
+
+Linux daily runner:
+
+```bash
+./scripts/run-daily.sh
+```
+
 Set MiniMax API key:
 
 ```powershell
@@ -239,4 +296,40 @@ $env:TELEGRAM_CHAT_ID="your_chat_id"
 $env:TELEGRAM_MESSAGE_THREAD_ID="optional_topic_id"
 $env:DINGTALK_WEBHOOK="your_dingtalk_webhook"
 $env:DINGTALK_SECRET="your_dingtalk_secret"
+$env:SFTP_PASSWORD="your_sftp_password"
+$env:SFTP_PRIVATE_KEY_PASSPHRASE="optional_private_key_passphrase"
+```
+
+## End-to-End Flow
+
+1. Run `npm run collect:x` on the collector machine.
+2. New post content is archived under `data/sources/...` and exported to `data/exports/<run_id>/posts.ndjson`.
+3. Run `npm run prepare:handoff` to flatten the latest exports into `data/handoff/outbox/`.
+4. Fill `handoff.sftp` in [config.json](/E:/code/py/info_user_x/config.json) and run `npm run push:sftp`.
+5. On the isolated Python consumer machine, copy [python_downstream/config.example.json](/E:/code/py/info_user_x/python_downstream/config.example.json) to `config.json` and fill FTP, LLM, and ClickHouse settings.
+6. Install Python deps with `pip install -r requirements.txt`.
+7. Run `python ftp_pull_and_ingest.py`.
+8. The Python script downloads `*.posts.ndjson` from FTP, deletes the remote file after successful local save, cleans each post through the HTTP LLM, checks dedupe by `url`, and inserts into `default.data_breach_events_distributed`.
+9. Downloaded source files are archived under `python_downstream/runtime/archive/`, and the local processing state is written to `python_downstream/runtime/state.json`.
+
+## Simple Crontab
+
+Recommended simplest approach:
+
+```bash
+cd /home/server/spider/info_user_x
+chmod +x scripts/run-daily.sh
+crontab -e
+```
+
+Then add one line:
+
+```cron
+30 8 * * * cd /home/server/spider/info_user_x && /home/server/spider/info_user_x/scripts/run-daily.sh >> /home/server/spider/info_user_x/data/runs/linux-cron.log 2>&1
+```
+
+If you want to use the configured cron expression from `config.json`, run:
+
+```bash
+./scripts/register-linux-cron.sh
 ```

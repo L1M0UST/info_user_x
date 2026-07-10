@@ -3,3 +3,6 @@ data/
 config.json
 .env
 .DS_Store
+python_downstream/runtime/
+python_downstream/__pycache__/
+*.pyc

@@ -188,6 +188,7 @@ async function makeStorage(config, postgresStore) {
     const canonicalKey = buildCanonicalKey(source, snapshot.postId);
     const postDir = buildPostDir(rootDir, source, snapshot);
     ensureDir(postDir);
+    const storedAt = new Date().toISOString();
 
     const originalTextPath = path.join(postDir, 'original.txt');
     const translatedTextPath = path.join(postDir, `translated.${config.llm.targetLanguage}.txt`);
@@ -234,7 +235,7 @@ async function makeStorage(config, postgresStore) {
         articleSnapshotPath: snapshot.snapshots.articleSnapshotPath,
         pageSnapshotPath: snapshot.snapshots.pageSnapshotPath,
       },
-      storedAt: new Date().toISOString(),
+      storedAt,
     };
 
     writeJson(postJsonPath, payload);
@@ -242,6 +243,7 @@ async function makeStorage(config, postgresStore) {
     const ingestRecord = {
       schemaVersion: 1,
       canonicalKey,
+      collectedAt: storedAt,
       source: payload.source,
       post: {
         postId: snapshot.postId,
@@ -261,7 +263,12 @@ async function makeStorage(config, postgresStore) {
         hasVideo: snapshot.media.hasVideo,
         videoPostUrl: snapshot.media.videoPostUrl,
         uiState: snapshot.uiState,
+        rawContentForLLM: [
+          `Original:\n${snapshot.text.original || ''}`,
+          translation?.translatedText ? `Translated:\n${translation.translatedText}` : '',
+        ].filter(Boolean).join('\n\n'),
       },
+      translation: translation || null,
       localFiles: {
         postDir: toRelative(rootDir, postDir),
         postJsonPath: toRelative(rootDir, postJsonPath),

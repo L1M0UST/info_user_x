@@ -122,6 +122,22 @@ function getDefaults() {
       exportStorageStatePath: path.join(projectRoot, 'data', 'runtime', 'storage-state.json'),
       loginCheckPath: path.join(projectRoot, 'data', 'runs', 'login-check.json'),
     },
+    handoff: {
+      enabled: true,
+      outboxDir: path.join(projectRoot, 'data', 'handoff', 'outbox'),
+      sentDir: path.join(projectRoot, 'data', 'handoff', 'sent'),
+      statePath: path.join(projectRoot, 'data', 'state', 'handoff.json'),
+      sftp: {
+        enabled: false,
+        host: '',
+        port: 22,
+        username: '',
+        passwordEnv: 'SFTP_PASSWORD',
+        privateKeyPath: '',
+        privateKeyPassphraseEnv: 'SFTP_PRIVATE_KEY_PASSPHRASE',
+        remoteDir: '/srv/info_user_x/inbox',
+      },
+    },
     database: {
       enabled: false,
       optional: true,

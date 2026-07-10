@@ -7,7 +7,9 @@
     "collect:x": "node src/cli/collect.js",
     "auth:export": "node src/cli/export-auth.js",
     "auth:import": "node src/cli/import-auth.js",
-    "db:init": "node src/cli/db-init.js"
+    "db:init": "node src/cli/db-init.js",
+    "prepare:handoff": "node src/cli/prepare-handoff.js",
+    "push:sftp": "node src/cli/sftp-push.js"
   },
   "keywords": [
     "x",
@@ -24,6 +26,7 @@
   "dependencies": {
     "pg": "^8.16.3",
     "playwright-core": "^1.59.1",
+    "ssh2-sftp-client": "^12.1.1",
     "undici": "^7.16.0"
   }
 }
